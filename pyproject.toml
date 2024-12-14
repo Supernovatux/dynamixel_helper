@@ -1,7 +1,7 @@
 [project]
 name = "dynamixel-helper"
 version = "0.1.0"
-description = "Add your description here"
+description = "dynamixel wrapper for xl series"
 readme = "README.md"
 authors = [
     { name = "supernovatux", email = "thulashitharan@gmail.com" }
