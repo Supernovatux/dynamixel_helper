@@ -1,15 +1,19 @@
-"""A module to control the dynamixel
-"""
+"""A module to control the dynamixel"""
+
 import warnings
 from enum import Enum
 
-from .vendor.dynamixel_sdk.src.dynamixel_sdk import PortHandler, PacketHandler, COMM_SUCCESS
+from .vendor.dynamixel_sdk.src.dynamixel_sdk import (
+    PortHandler,
+    PacketHandler,
+    COMM_SUCCESS,
+)
 
 DXL_MINIMUM_POSITION_VALUE: int = 0
 DXL_MAXIMUM_POSITION_VALUE: int = 4095
 BAUDRATE: int = 57600
 PROTOCOL_VERSION: int = 2
-DEVICENAME: str = '/dev/ttyUSB0'
+DEVICENAME: str = "/dev/ttyUSB0"
 TORQUE_ENABLE: int = 1
 TORQUE_DISABLE: int = 0
 
@@ -19,6 +23,7 @@ class Motors(Enum):
         "ADDR_TORQUE_ENABLE": 64,
         "ADDR_GOAL_POSITION": 116,
         "ADDR_PRESENT_POSITION": 132,
+        "ADDR_HOMING_OFFSET": 20,
     }
     MX_SERIES = {
         "ADDR_TORQUE_ENABLE": 24,
@@ -43,6 +48,9 @@ class Motors(Enum):
     def get_position_addr(self) -> int:
         return self.control_table["ADDR_PRESENT_POSITION"]
 
+    def get_homing_addr(self) -> int:
+        return self.control_table["ADDR_HOMING_OFFSET"]
+
 
 class OperatingModes(Enum):
     POSITION = 3
@@ -50,10 +58,15 @@ class OperatingModes(Enum):
 
 
 class DynamixelCtrlU2D2:
-    def __init__(self, motor: Motors = Motors.X_SERIES,
-                 operating_mode: OperatingModes = OperatingModes.EXTENDED_POSITION,
-                 port: str = DEVICENAME, protocol_version: int = PROTOCOL_VERSION, baudrate: int = BAUDRATE,
-                 moving_threshold: int = 20, homing: int = 0):
+    def __init__(
+        self,
+        motor: Motors = Motors.X_SERIES,
+        operating_mode: OperatingModes = OperatingModes.EXTENDED_POSITION,
+        port: str = DEVICENAME,
+        protocol_version: int = PROTOCOL_VERSION,
+        baudrate: int = BAUDRATE,
+        moving_threshold: int = 20,
+    ):
         """
         Initializes the Dynamixel control object.
 
@@ -69,6 +82,7 @@ class DynamixelCtrlU2D2:
         self.ADDR_TORQUE_ENABLE = motor.get_torque_addr()
         self.ADDR_GOAL_POSITION = motor.get_goal_addr()
         self.ADDR_PRESENT_POSITION = motor.get_position_addr()
+        self.ADDR_HOMING_OFF = motor.get_homing_addr()
         self.ADDR_HOMING_OFF = 20
         self.DXL_MOVING_STATUS_THRESHOLD = moving_threshold
         self.ADDR_OPERATING_MODE = 11
@@ -80,7 +94,13 @@ class DynamixelCtrlU2D2:
             raise OSError("Failed to change the baudrate")
         if self.OPERATING_MODE == 4:
             self.DXL_ORIGIN_POS = 0
-            self.DXL_HOMING_OFF = homing
+
+    def set_homing_offset(self, id, homing_offset: int):
+        dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(
+            self.portHandler, id, self.ADDR_HOMING_OFF, homing_offset
+        )
+        if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
+            warnings.warn(f"Unable reach the Dynamixel id {id}", RuntimeWarning)
 
     def position_reached(self, id: int, pos: int):
         """
@@ -104,13 +124,14 @@ class DynamixelCtrlU2D2:
             block_thread (int): If true waits till dynamixel reaches the goal position
         """
         dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(
-            self.portHandler, id, self.ADDR_GOAL_POSITION, pos)
+            self.portHandler, id, self.ADDR_GOAL_POSITION, pos
+        )
         if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
             warnings.warn("Unable to get position", RuntimeWarning)
         if block_thread:
             self.position_reached(id, pos)
 
-    def add_motor(self, id: int):
+    def add_motor(self, id: int, center=False):
         """
         Initializes the specified Dynamixel servo.
 
@@ -118,30 +139,27 @@ class DynamixelCtrlU2D2:
             id (int): The ID of the Dynamixel servo to initialize.
         """
         self._set_opmode(id)
-        self.set_homing_off(id)
+        if center:
+            home = self.get_goal(id=id)
+            home += 522239 - home
+            self.set_homing_offset(id, home)
+
         dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(
-            self.portHandler, id, self.ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+            self.portHandler, id, self.ADDR_TORQUE_ENABLE, TORQUE_ENABLE
+        )
         if self._handle_dxl_errors(dxl_comm_result, dxl_error):
-            #print("Dynamixel has been successfully connected")
+            # print("Dynamixel has been successfully connected")
             # self.resetDxl(id)
             self.used_dxls.add(id)
         else:
-            warnings.warn(
-                f"Unable reach the Dynamixel id {id}", RuntimeWarning)
+            warnings.warn(f"Unable reach the Dynamixel id {id}", RuntimeWarning)
 
     def _set_opmode(self, id):
         dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(
-            self.portHandler, id, self.ADDR_OPERATING_MODE, self.OPERATING_MODE)
+            self.portHandler, id, self.ADDR_OPERATING_MODE, self.OPERATING_MODE
+        )
         if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
-            warnings.warn(
-                f"Unable reach the Dynamixel id {id}", RuntimeWarning)
-
-    def set_homing_off(self, id):
-        dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(
-            self.portHandler, id, self.ADDR_HOMING_OFF, self.DXL_HOMING_OFF)
-        if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
-            warnings.warn(
-                f"Unable reach the Dynamixel id {id}", RuntimeWarning)
+            warnings.warn(f"Unable reach the Dynamixel id {id}", RuntimeWarning)
 
     def reset_dxl(self, id: int):
         """
@@ -158,11 +176,13 @@ class DynamixelCtrlU2D2:
         If there is an error while attempting to get the position of the motor,
         a warning will be raised.
         """
-        dxl_present_position, dxl_comm_result, dxl_error = self.packetHandler.read4ByteTxRx(
-            self.portHandler, id, self.ADDR_PRESENT_POSITION)
+        dxl_present_position, dxl_comm_result, dxl_error = (
+            self.packetHandler.read4ByteTxRx(
+                self.portHandler, id, self.ADDR_PRESENT_POSITION
+            )
+        )
         if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
-            warnings.warn(
-                f"Get position failed on Dynamixel id {id}", RuntimeWarning)
+            warnings.warn(f"Get position failed on Dynamixel id {id}", RuntimeWarning)
         return dxl_present_position
 
     def _handle_dxl_errors(self, dxl_comm_result, dxl_error) -> bool:
@@ -182,7 +202,8 @@ class DynamixelCtrlU2D2:
     def __del__(self):
         for i in self.used_dxls:
             dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(
-                self.portHandler, i, self.ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
+                self.portHandler, i, self.ADDR_TORQUE_ENABLE, TORQUE_DISABLE
+            )
             if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
                 warnings.warn("Unable to close the Dynamixel", RuntimeWarning)
         self.portHandler.closePort()
