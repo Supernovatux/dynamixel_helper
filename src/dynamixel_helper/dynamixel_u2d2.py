@@ -18,11 +18,18 @@ TORQUE_ENABLE: int = 1
 TORQUE_DISABLE: int = 0
 
 
+def dyn2int(value: int, bytes: int) -> int:
+    if value & (1 << (bytes * 8 - 1)):  # Check if the sign bit is set
+        value -= 1 << (bytes * 8)  # Convert to negative equivalent
+    return value
+
+
 class Motors(Enum):
     X_SERIES = {
         "ADDR_TORQUE_ENABLE": 64,
         "ADDR_GOAL_POSITION": 116,
         "ADDR_PRESENT_POSITION": 132,
+        "ADDR_PRESENT_CURRENT": 126,
         "ADDR_HOMING_OFFSET": 20,
     }
     MX_SERIES = {
@@ -47,6 +54,9 @@ class Motors(Enum):
 
     def get_position_addr(self) -> int:
         return self.control_table["ADDR_PRESENT_POSITION"]
+
+    def get_current_addr(self) -> int:
+        return self.control_table["ADDR_PRESENT_CURRENT"]
 
     def get_homing_addr(self) -> int:
         return self.control_table["ADDR_HOMING_OFFSET"]
@@ -83,7 +93,7 @@ class DynamixelCtrlU2D2:
         self.ADDR_GOAL_POSITION = motor.get_goal_addr()
         self.ADDR_PRESENT_POSITION = motor.get_position_addr()
         self.ADDR_HOMING_OFF = motor.get_homing_addr()
-        self.ADDR_HOMING_OFF = 20
+        self.ADDR_PRESENT_CURRENT = motor.get_current_addr()
         self.DXL_MOVING_STATUS_THRESHOLD = moving_threshold
         self.ADDR_OPERATING_MODE = 11
 
@@ -141,8 +151,7 @@ class DynamixelCtrlU2D2:
         self._set_opmode(id)
         if center:
             home = self.get_goal(id=id)
-            home += 522239 - home
-            self.set_homing_offset(id, home)
+            self.set_homing_offset(id, -home)
 
         dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(
             self.portHandler, id, self.ADDR_TORQUE_ENABLE, TORQUE_ENABLE
@@ -183,7 +192,22 @@ class DynamixelCtrlU2D2:
         )
         if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
             warnings.warn(f"Get position failed on Dynamixel id {id}", RuntimeWarning)
-        return dxl_present_position
+        return dyn2int(dxl_present_position, 4)
+
+    def get_current(self, id: int) -> int:
+        """
+        This method is used to get the current current(A) usage of a Dynamixel motor with the given ID. It takes the ID of the motor as an integer parameter and returns the current position of the motor as an integer value.
+        If there is an error while attempting to get the position of the motor,
+        a warning will be raised.
+        """
+        dxl_present_position, dxl_comm_result, dxl_error = (
+            self.packetHandler.read2ByteTxRx(
+                self.portHandler, id, self.ADDR_PRESENT_CURRENT
+            )
+        )
+        if not self._handle_dxl_errors(dxl_comm_result, dxl_error):
+            warnings.warn(f"Get position failed on Dynamixel id {id}", RuntimeWarning)
+        return dyn2int(dxl_present_position, 2)
 
     def _handle_dxl_errors(self, dxl_comm_result, dxl_error) -> bool:
         """

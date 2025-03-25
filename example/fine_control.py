@@ -5,7 +5,7 @@ import argparse
 def main():
     parser = argparse.ArgumentParser(description="Serial Data Logger")
     parser.add_argument(
-        "-m", "--motor", type=str, default="/dev/ttyUSB1", help="Motor port"
+        "-m", "--motor", type=str, default="/dev/ttyUSB0", help="Motor port"
     )
     parser.add_argument("-i", "--motor-id", type=int, default=4, help="Motor id")
     args = parser.parse_args()
